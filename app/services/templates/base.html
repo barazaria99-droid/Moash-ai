@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}ממשק ניהול — {{ shop_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <nav class="navbar">
+    <span class="nav-brand">🔧 {{ shop_name }}</span>
+    <div class="nav-links">
+      <a href="/admin/" class="nav-link">לוח בקרה</a>
+      <a href="/health" class="nav-link nav-link-dim">בריאות</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+</body>
+</html>

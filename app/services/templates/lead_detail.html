@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+{% block title %}פניה #{{ lead.id }} — {{ shop_name }}{% endblock %}
+
+{% block content %}
+<a href="/admin/" class="back-link">← חזרה ללוח הבקרה</a>
+
+<div class="page-header">
+  <h1 class="page-title">פניה #{{ lead.id }} — {{ lead.display_name }}</h1>
+  <div class="header-badges">
+    <!-- Lead status (admin-facing) -->
+    <span class="badge badge-s-{{ lead.status }} badge-lg">
+      {{ lead_status_labels[lead.status] }}
+    </span>
+    <!-- Bot state (technical context) -->
+    <span class="badge badge-state badge-lg" title="שלב נוכחי בשיחה">
+      🤖 {{ state_labels[lead.state] }}
+    </span>
+  </div>
+</div>
+
+<!-- ── Top grid: Customer info + Admin controls ───────────────────────────── -->
+<div class="detail-top-grid">
+
+  <!-- Customer Info -->
+  <div class="card">
+    <h2 class="card-title">👤 פרטי לקוח</h2>
+    <dl class="info-list">
+
+      <dt>שם מלא</dt>
+      <dd>{{ lead.customer_name or '—' }}</dd>
+
+      <dt>טלפון</dt>
+      <dd>{{ lead.customer_phone or '—' }}</dd>
+
+      <dt>כתובת ווצאפ</dt>
+      <dd class="monospace">{{ lead.wa_phone | strip_wa }}</dd>
+
+      <dt>רכב</dt>
+      <dd>
+        {% if lead.vehicle_year %}{{ lead.vehicle_year }} {% endif %}
+        {{ lead.vehicle_model or '—' }}
+      </dd>
+
+      <dt>מעורבות ביטוח</dt>
+      <dd>
+        {% if lead.has_insurance is none %}—
+        {% elif lead.has_insurance %}
+          ✅ כן
+          {% if lead.insurance_company %}
+            — <strong>{{ lead.insurance_company }}</strong>
+          {% endif %}
+        {% else %}❌ לא{% endif %}
+      </dd>
+
+      <dt>תיאור הנזק</dt>
+      <dd class="description-text">{{ lead.damage_description or '—' }}</dd>
+
+      <dt>תמונות שהועלו</dt>
+      <dd>{{ lead.photo_count }} מתוך {{ (lead.photo_urls or [])|length }} שנשלחו</dd>
+
+      <dt>פניה נפתחה</dt>
+      <dd>{{ lead.created_at.strftime('%d/%m/%Y %H:%M') }}</dd>
+
+      <dt>עדכון אחרון</dt>
+      <dd>{{ lead.updated_at.strftime('%d/%m/%Y %H:%M') }}</dd>
+
+    </dl>
+  </div>
+
+  <!-- Admin Controls -->
+  <div class="card">
+    <h2 class="card-title">⚙️ ניהול פניה</h2>
+
+    <!-- Status update -->
+    <form method="post" action="/admin/lead/{{ lead.id }}/status" class="inline-form">
+      <label class="form-label">שינוי סטטוס</label>
+      <div class="form-row">
+        <select name="new_status" class="form-select">
+          {% for s in statuses %}
+          <option value="{{ s }}" {% if lead.status == s %}selected{% endif %}>
+            {{ lead_status_labels[s] }}
+          </option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn-primary">עדכן</button>
+      </div>
+    </form>
+
+    <hr class="divider" />
+
+    <!-- Admin notes -->
+    <form method="post" action="/admin/lead/{{ lead.id }}/notes" class="inline-form">
+      <label class="form-label">הערות פנימיות <span class="label-note">(לא נשלחות ללקוח)</span></label>
+      <textarea name="notes" rows="5" class="form-textarea"
+        placeholder="לדוגמה: דיברתי עם הלקוח, הבטיח להגיע ביום ג׳...">{{ lead.admin_notes or '' }}</textarea>
+      <button type="submit" class="btn-secondary">שמור הערות</button>
+    </form>
+
+    {% if lead.admin_notes %}
+    <div class="notes-preview">
+      <span class="notes-label">הערה שמורה:</span>
+      {{ lead.admin_notes }}
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- ── AI Analysis ─────────────────────────────────────────────────────────── -->
+{% if lead.ai_analysis %}
+{% set a = lead.ai_analysis %}
+{# Support both new schema (severity / summary / confidence) and legacy field names #}
+{% set sev  = a.get('severity') or a.get('severity_level', 'medium') %}
+{% set summ = a.get('summary')  or a.get('damage_summary', '—') %}
+{% set conf_raw = a.get('confidence') if a.get('confidence') is not none else a.get('confidence_score', 0) %}
+{% set conf = (conf_raw * 100) | int %}
+{# Affected parts — new schema is a list, legacy is a string #}
+{% set parts_raw = a.get('primary_affected_parts') %}
+{% set parts_str = parts_raw | join(', ') if parts_raw is iterable and parts_raw is not string else (a.get('affected_area', '—')) %}
+{# Missing angles — new schema is a list, legacy is a string #}
+{% set missing_raw = a.get('missing_angles') %}
+{% set missing_str = missing_raw | join(', ') if missing_raw is iterable and missing_raw is not string else (a.get('missing_information', '—')) %}
+
+<div class="card analysis-card">
+  <h2 class="card-title">🤖 ניתוח בינה מלאכותית</h2>
+
+  <div class="analysis-grid">
+
+    <div class="analysis-item analysis-item-wide">
+      <label>סיכום הנזק</label>
+      <p>{{ summ }}</p>
+    </div>
+
+    <div class="analysis-item">
+      <label>אזורים שנפגעו</label>
+      <p>{{ parts_str or '—' }}</p>
+    </div>
+
+    <div class="analysis-item">
+      <label>רמת חומרה</label>
+      <span class="badge badge-sev-{{ sev }} badge-lg">
+        {% if sev == 'low' %}🟢 נמוכה
+        {% elif sev == 'medium' %}🟡 בינונית
+        {% elif sev == 'high' %}🔴 גבוהה
+        {% else %}{{ sev }}{% endif %}
+      </span>
+    </div>
+
+    {% if a.get('has_structural_risk') %}
+    <div class="analysis-item">
+      <label>סיכון מבני</label>
+      <span class="badge badge-sev-high badge-lg">⚠️ חשד לנזק מבני</span>
+    </div>
+    {% endif %}
+
+    {% if a.get('replacement_likely_parts') %}
+    <div class="analysis-item">
+      <label>חלקים הדורשים החלפה</label>
+      <p>{{ a.get('replacement_likely_parts') | join(', ') }}</p>
+    </div>
+    {% endif %}
+
+    <div class="analysis-item">
+      <label>מידע חסר לאומדן מדויק</label>
+      <p>{{ missing_str or '—' }}</p>
+    </div>
+
+    <div class="analysis-item">
+      <label>ציון ביטחון הבינה המלאכותית</label>
+      <div class="confidence-bar">
+        <div class="confidence-fill confidence-fill-{{ 'low' if conf < 40 else ('mid' if conf < 70 else 'high') }}"
+             style="width: {{ conf }}%"></div>
+      </div>
+      <span class="confidence-label">
+        {{ conf }}%
+        {% if conf < 40 %}— נמוך, מומלץ בדיקה אנושית
+        {% elif conf < 70 %}— בינוני
+        {% else %}— טוב{% endif %}
+      </span>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── Pricing estimate ────────────────────────────────────────────────────── -->
+{% if lead.price_estimate %}
+{% set pe = lead.price_estimate %}
+<div class="card analysis-card">
+  <h2 class="card-title">💰 הערכת מחיר</h2>
+
+  <div class="analysis-grid">
+
+    <div class="analysis-item">
+      <label>טווח מחיר מוערך</label>
+      <p class="price-text">
+        ₪{{ pe.get('estimated_min_price_ils', 0) | int }}
+        —
+        ₪{{ pe.get('estimated_max_price_ils', 0) | int }}
+      </p>
+      <p class="price-note">* הערכה ראשונית בלבד — המחיר הסופי נקבע בבדיקה פיזית</p>
+    </div>
+
+    <div class="analysis-item">
+      <label>הצעד הבא המומלץ</label>
+      <p>{{ pe.get('recommended_next_step', '—') }}</p>
+    </div>
+
+    <div class="analysis-item analysis-item-wide">
+      <label>הסבר האומדן</label>
+      <p>{{ pe.get('estimate_explanation', '—') }}</p>
+    </div>
+
+    {% if pe.get('line_items') %}
+    <div class="analysis-item analysis-item-wide">
+      <label>פירוט לפי חלק</label>
+      <table class="media-audit-table">
+        <thead>
+          <tr>
+            <th>חלק</th>
+            <th>סוג נזק</th>
+            <th>חומרה</th>
+            <th>מינימום</th>
+            <th>מקסימום</th>
+            <th>הערה</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for li in pe.get('line_items', []) %}
+          <tr>
+            <td>{{ li.get('part_name', '—') }}</td>
+            <td>{{ li.get('damage_type', '—') }}</td>
+            <td>{{ li.get('effective_severity', '—') }}</td>
+            <td>₪{{ li.get('price_min_ils', 0) | int }}</td>
+            <td>₪{{ li.get('price_max_ils', 0) | int }}</td>
+            <td>{{ li.get('note', '') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% elif a.get('estimated_price_range_ils') %}
+{# Legacy leads — old schema stored price in ai_analysis directly #}
+<div class="card analysis-card">
+  <h2 class="card-title">💰 הערכת מחיר</h2>
+  <div class="analysis-grid">
+    <div class="analysis-item">
+      <label>הערכת עלות ראשונית</label>
+      <p class="price-text">₪{{ a.get('estimated_price_range_ils') }}</p>
+      <p class="price-note">* הערכה ראשונית בלבד</p>
+    </div>
+    {% if a.get('recommended_next_step') %}
+    <div class="analysis-item">
+      <label>הצעד הבא המומלץ</label>
+      <p>{{ a.get('recommended_next_step') }}</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% elif lead.state == 'analyzing' %}
+<div class="card card-info">
+  <p>⏳ <strong>הניתוח בתהליך</strong> — הרענן את הדף בעוד כמה שניות.</p>
+</div>
+{% elif lead.state == 'completed' and lead.status == 'needs_human_review' %}
+<div class="card card-warning">
+  <p>⚠️ <strong>הניתוח נכשל או דרש בדיקה אנושית.</strong> ייתכן שהתמונות לא היו ברורות מספיק.</p>
+</div>
+{% else %}
+<div class="card card-muted">
+  <p class="muted">הניתוח טרם הופעל — הלקוח עדיין בשלבי מילוי הטופס.</p>
+</div>
+{% endif %}
+
+<!-- ── Photos ──────────────────────────────────────────────────────────────── -->
+{% if lead.media_items %}
+<div class="card">
+  <h2 class="card-title">
+    📷 תמונות
+    <span class="card-title-meta">
+      ({{ lead.photo_count }} הורדו בהצלחה מתוך {{ lead.media_items | length }} שנשלחו)
+    </span>
+  </h2>
+
+  <!-- Photo thumbnails for successfully downloaded images -->
+  {% set ok_items = lead.media_items | selectattr('download_ok') | list %}
+  {% if ok_items %}
+  <div class="photo-grid">
+    {% for item in ok_items %}
+    <a href="/uploads/{{ item.filename }}" target="_blank" class="photo-link">
+      <img src="/uploads/{{ item.filename }}"
+           alt="תמונת נזק {{ loop.index }}"
+           class="photo-thumb"
+           loading="lazy" />
+      <span class="photo-num">{{ loop.index }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Per-photo audit table (all attempts, success + failure) -->
+  <details class="url-details" {% if lead.media_items | length <= 3 %}open{% endif %}>
+    <summary>טבלת ביקורת מדיה ({{ lead.media_items | length }} רשומות)</summary>
+    <table class="media-audit-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>סטטוס</th>
+          <th>MIME</th>
+          <th>גודל</th>
+          <th>קובץ מקומי</th>
+          <th>URL מקור</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in lead.media_items %}
+        <tr class="{% if item.download_ok %}row-ok{% else %}row-fail{% endif %}">
+          <td>{{ loop.index }}</td>
+          <td>
+            {% if item.download_ok %}
+              <span class="badge-dl-ok">✅ הורד</span>
+            {% else %}
+              <span class="badge-dl-fail" title="{{ item.error_message or '' }}">❌ נכשל</span>
+            {% endif %}
+          </td>
+          <td class="monospace">{{ item.mime_type or '—' }}</td>
+          <td>
+            {% if item.file_size_bytes is not none %}
+              {{ (item.file_size_bytes / 1024) | round(1) }} KB
+            {% else %}—{% endif %}
+          </td>
+          <td class="monospace">
+            {% if item.local_path %}
+              <a href="/uploads/{{ item.filename }}" target="_blank">{{ item.filename }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td class="monospace url-cell">
+            <a href="{{ item.twilio_url }}" target="_blank">{{ item.twilio_url[:60] }}…</a>
+          </td>
+        </tr>
+        {% if not item.download_ok and item.error_message %}
+        <tr class="row-error-detail">
+          <td colspan="6" class="error-msg">⚠️ {{ item.error_message }}</td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</div>
+{% elif lead.photo_urls %}
+<!-- Legacy: URLs stored but no MediaItem rows (pre-phase-5 data) -->
+<div class="card card-warning">
+  <h2 class="card-title">📷 תמונות (נתוני עבר — ללא רשומות הורדה)</h2>
+  <p>נמצאו {{ lead.photo_urls|length }} קישורי Twilio. קישורי המקור:</p>
+  <ul class="url-list">
+    {% for url in lead.photo_urls %}
+    <li><a href="{{ url }}" target="_blank" class="monospace">{{ url[:80] }}…</a></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<!-- ── Conversation history ────────────────────────────────────────────────── -->
+<div class="card">
+  <h2 class="card-title">💬 היסטוריית שיחה
+    <span class="card-title-meta">({{ lead.messages | length }} הודעות)</span>
+  </h2>
+  <div class="conversation-thread">
+    {% for msg in lead.messages %}
+    <div class="message message-{{ msg.direction }}">
+
+      <div class="message-meta">
+        {% if msg.direction == 'inbound' %}👤 לקוח{% else %}🤖 בוט{% endif %}
+        &nbsp;·&nbsp;
+        {{ msg.created_at.strftime('%d/%m/%Y %H:%M:%S') }}
+      </div>
+
+      {% if msg.body %}
+      <div class="message-body">{{ msg.body }}</div>
+      {% endif %}
+
+      {% if msg.media_urls %}
+      {# Match each URL in this message to its MediaItem row for thumbnail/status #}
+      <div class="message-media-grid">
+        {% for url in msg.media_urls %}
+          {% set matched = [] %}
+          {% for item in lead.media_items %}
+            {% if item.twilio_url == url %}
+              {% if matched.append(item) %}{% endif %}
+            {% endif %}
+          {% endfor %}
+          {% set item = matched | first %}
+          {% if item %}
+            {% if item.download_ok and item.filename %}
+            <a href="/uploads/{{ item.filename }}" target="_blank" class="msg-thumb-link"
+               title="{{ item.mime_type }} — {{ (item.file_size_bytes / 1024) | round(1) }} KB">
+              <img src="/uploads/{{ item.filename }}"
+                   class="msg-thumb" alt="מדיה {{ loop.index }}" loading="lazy" />
+            </a>
+            {% else %}
+            <div class="msg-thumb-fail"
+                 title="{{ item.error_message or 'הורדה נכשלה' }}">
+              <span>❌</span>
+              <small>{{ item.mime_type or 'media' }}</small>
+            </div>
+            {% endif %}
+          {% else %}
+          {# URL in message log but no MediaItem row — pre-pipeline data #}
+          <div class="msg-thumb-fail" title="{{ url }}">
+            <span>🔗</span><small>URL בלבד</small>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+    </div>
+    {% endfor %}
+
+    {% if not lead.messages %}
+    <p class="muted">אין הודעות רשומות עדיין.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

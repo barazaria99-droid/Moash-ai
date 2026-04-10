@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}לוח בקרה — {{ shop_name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">לוח בקרה — פניות לקוחות</h1>
+  <span class="page-subtitle">כל פניות הבוט בוואטסאפ, בזמן אמת</span>
+</div>
+
+<!-- ── Stats cards ─────────────────────────────────────────────────────────── -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-number">{{ stats.total }}</div>
+    <div class="stat-label">סה"כ פניות</div>
+  </div>
+  <div class="stat-card stat-accent-new">
+    <div class="stat-number">{{ stats.new }}</div>
+    <div class="stat-label">חדשות</div>
+  </div>
+  <div class="stat-card stat-accent-awaiting">
+    <div class="stat-number">{{ stats.awaiting_photos }}</div>
+    <div class="stat-label">ממתינות לתמונות</div>
+  </div>
+  <div class="stat-card stat-accent-ready">
+    <div class="stat-number">{{ stats.ready_for_estimate }}</div>
+    <div class="stat-label">מוכנות להערכה</div>
+  </div>
+  <div class="stat-card stat-accent-estimated">
+    <div class="stat-number">{{ stats.estimated }}</div>
+    <div class="stat-label">הוערכו</div>
+  </div>
+  <div class="stat-card stat-accent-review">
+    <div class="stat-number">{{ stats.needs_human_review }}</div>
+    <div class="stat-label">דורשות בדיקה</div>
+  </div>
+  <div class="stat-card stat-accent-booked">
+    <div class="stat-number">{{ stats.booked }}</div>
+    <div class="stat-label">תואמו</div>
+  </div>
+</div>
+
+<!-- ── Filter bar ──────────────────────────────────────────────────────────── -->
+<div class="filter-bar">
+  <span class="filter-label">סינון לפי סטטוס:</span>
+  <a href="/admin/?status_filter=all"
+     class="filter-btn {% if status_filter == 'all' %}active{% endif %}">הכל</a>
+  {% for s in statuses %}
+  <a href="/admin/?status_filter={{ s }}"
+     class="filter-btn filter-s-{{ s }} {% if status_filter == s %}active{% endif %}">
+    {{ lead_status_labels[s] }}
+  </a>
+  {% endfor %}
+</div>
+
+<!-- ── Lead table ──────────────────────────────────────────────────────────── -->
+{% if leads %}
+<div class="table-wrapper">
+  <table class="leads-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>שם לקוח</th>
+        <th>טלפון</th>
+        <th>רכב</th>
+        <th>חומרה</th>
+        <th>עלות מוערכת (₪)</th>
+        <th>ביטוח</th>
+        <th>תמונות</th>
+        <th>הודעות</th>
+        <th>סטטוס</th>
+        <th>תאריך</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lead in leads %}
+      <tr class="lead-row">
+        <td class="cell-id">{{ lead.id }}</td>
+
+        <td class="cell-name">{{ lead.customer_name or '—' }}</td>
+
+        <td class="cell-phone">{{ lead.customer_phone or (lead.wa_phone | strip_wa) }}</td>
+
+        <td class="cell-vehicle">
+          {% if lead.vehicle_year %}{{ lead.vehicle_year }} {% endif %}
+          {{ lead.vehicle_model or '—' }}
+        </td>
+
+        <td>
+          {% if lead.ai_analysis %}
+            {# Support both new schema (severity) and legacy (severity_level) #}
+            {% set sev = lead.ai_analysis.get('severity') or lead.ai_analysis.get('severity_level', '') %}
+            <span class="badge badge-sev-{{ sev }}">
+              {% if sev == 'low' %}🟢 נמוכה
+              {% elif sev == 'medium' %}🟡 בינונית
+              {% elif sev == 'high' %}🔴 גבוהה
+              {% else %}—{% endif %}
+            </span>
+          {% else %}<span class="muted-dash">—</span>{% endif %}
+        </td>
+
+        <td class="cell-price">
+          {% if lead.price_estimate %}
+            {% set pe = lead.price_estimate %}
+            ₪{{ pe.get('estimated_min_price_ils', 0) | int }}–{{ pe.get('estimated_max_price_ils', 0) | int }}
+          {% elif lead.ai_analysis and lead.ai_analysis.get('estimated_price_range_ils') %}
+            ₪{{ lead.ai_analysis.get('estimated_price_range_ils') }}
+          {% else %}<span class="muted-dash">—</span>{% endif %}
+        </td>
+
+        <td>
+          {% if lead.has_insurance is none %}<span class="muted-dash">—</span>
+          {% elif lead.has_insurance %}כן
+          {% else %}לא{% endif %}
+        </td>
+
+        <td class="cell-photos">
+          {%- set first_img = lead.media_items | selectattr('download_ok') | list | first %}
+          {% if first_img %}
+          <a href="/admin/lead/{{ lead.id }}" class="thumb-link">
+            <img src="/uploads/{{ first_img.filename }}"
+                 class="thumb-sm" alt="תמונה ראשונה" loading="lazy" />
+          </a>
+          {% endif %}
+          <span class="photo-count {% if lead.photo_count >= 1 %}photo-ok{% endif %}">
+            {{ lead.photo_count }}
+          </span>
+        </td>
+
+        <td class="cell-msgs">
+          <span class="msg-count">{{ lead.messages | length }}</span>
+        </td>
+
+        <td>
+          <span class="badge badge-s-{{ lead.status }}">
+            {{ lead_status_labels[lead.status] }}
+          </span>
+        </td>
+
+        <td class="cell-date">{{ lead.created_at.strftime('%d/%m/%Y') }}</td>
+
+        <td>
+          <a href="/admin/lead/{{ lead.id }}" class="btn-view">פרטים ←</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <p class="empty-title">אין פניות{% if status_filter != 'all' %} בסטטוס זה{% endif %}</p>
+  {% if status_filter != 'all' %}
+  <a href="/admin/" class="btn-secondary-link">הצג הכל</a>
+  {% else %}
+  <p class="empty-sub">כאשר לקוחות יפנו דרך הבוט, הם יופיעו כאן.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}
